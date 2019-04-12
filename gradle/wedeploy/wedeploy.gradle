@@ -1,0 +1,231 @@
+/*
+ * Copyright (c) 2000-present Liferay, Inc. All rights reserved.
+ *
+ * The contents of this file are subject to the terms of the Liferay Enterprise
+ * Subscription License ("License"). You may not use this file except in
+ * compliance with the License. You can obtain a copy of the License by
+ * contacting Liferay, Inc. See the License for the specific language governing
+ * permissions and limitations under the License, including but not limited to
+ * distribution rights of the Software.
+ */
+
+apply plugin: 'base'
+
+def liferayDxpServiceDirPropName = 'liferay.workspace.wedeploy.liferay.service.dir.name'
+def localStackUseSudoPropName = 'liferay.workspace.wedeploy.local.stack.use.sudo'
+
+project.extensions.add(
+        'dxpcloud', [
+                // Do not use project.buildDir, since that would most likely be 'gradle/wedeploy/build',
+                // where we want to keep only the build scripts sources and related files
+
+                servicesSourceDir   : rootProject.file('wedeploy'),
+                servicesBuildDir    : rootProject.file("${rootProject.buildDir}/wedeploy"),
+
+                distBundleTask      : _findLiferayWorkspaceTask(':distBundle'),
+                downloadBundleTask  : _findLiferayWorkspaceTask(':downloadBundle'),
+
+                liferayDxpServiceDir: (rootProject.findProperty(liferayDxpServiceDirPropName) ?: ''),
+                localStackUseSudo   : (rootProject.findProperty(localStackUseSudoPropName) ?: 'false').toBoolean()
+        ])
+
+apply from: 'dxpcloud-localdev.gradle'
+
+def servicesSourceDir = project.dxpcloud.servicesSourceDir
+def servicesBuildDir = project.dxpcloud.servicesBuildDir
+def liferayDxpServiceDir = project.dxpcloud.liferayDxpServiceDir
+
+// We need to know where the DXP service is located inside 'wedeploy/' - to install built artifact into it
+rootProject.file("${servicesSourceDir}/${liferayDxpServiceDir}").with {
+    assert liferayDxpServiceDir,
+            "Please set '$liferayDxpServiceDirPropName' to specify the location of 'liferay' service for DXP Cloud in inside '$servicesSourceDir'"
+    assert it.isDirectory(), 
+            "Directory '${it}' not found, it should contain the 'liferay' service for DXP Cloud (configured by $liferayDxpServiceDirPropName)."
+}
+
+// 'distBundle' from Liferay Workspace plugin builds all custom modules from 'modules', 
+// themes' and 'wars' directories and puts them as jar / war files into 'build/dist (osgi/modules, deploy)
+def distBundleTask = project.dxpcloud.distBundleTask
+def downloadBundleTask = project.dxpcloud.downloadBundleTask
+
+// most likely 'build/dist'
+def distBundleTaskDestDir = ((Copy)distBundleTask).destinationDir
+
+task distWeDeploy {
+    group "DXP Cloud"
+    description "Prepares directory with services deployable to DXP Cloud, from services defined in '${rootProject.relativePath(servicesSourceDir)}'"
+
+    dependsOn clean, 'buildDxpCloudServices', 'copyBuiltWorkspaceModules'
+    
+    doFirst {
+        servicesBuildDir.mkdirs()
+    }
+
+    doLast {
+        println "Services for DXP Cloud were built and are ready to be deployed from '${rootProject.relativePath(servicesBuildDir)}':"
+
+        rootProject.fileTree(servicesBuildDir).findAll { it.name == 'wedeploy.json' }.each { File f ->
+            println "  * ${_relativePath(servicesBuildDir, f.parentFile)}"
+        }
+    }
+}
+
+task buildDxpCloudServices(type: Copy) {
+    dependsOn clean
+    
+    def copyFilterIncludesPropName = 'liferay.workspace.wedeploy.copy.filter.includes'
+    def copyFilterIncludes =
+            (rootProject.findProperty(copyFilterIncludesPropName) as String ?: '').split(',').toList()
+
+    // expose the variable, so that it cann be access from outside of this task, if needed
+    ext.dxpcloudTokenReplacements = rootProject.properties.with {
+        return subMap(it.keySet().findAll { it.startsWith('liferay.workspace.wedeploy.' ) })
+    }
+    
+    // Make sure it's possible to add a copying from other places (e.g. 'configs'), inside [root]/build.gradle
+    from(servicesSourceDir) {
+        exclude '**/.keep'
+        exclude '**/.gitkeep'
+        
+        // Workaround for https://issues.gradle.org/browse/GRADLE-1566
+        filesMatching(copyFilterIncludes) {
+            filter(
+                    org.apache.tools.ant.filters.ReplaceTokens,
+                    tokens: dxpcloudTokenReplacements
+            )
+        }
+    }
+
+    into servicesBuildDir
+    
+    doFirst {
+        logger.info "Replacing following tokens in the content of copied files:\n" +
+                "${dxpcloudTokenReplacements .collect { "  * @${it.key}@ -> ${it.value}"}.sort().join('\n')}"
+        
+        logger.info "Following files will be included in token expansion (${copyFilterIncludesPropName}):\n" +
+                "${copyFilterIncludes.collect { "  * ${it}"}.join('\n')}"
+
+        println "Collecting static DXP Cloud files from '${servicesSourceDir}':"
+    }
+
+    eachFile { FileCopyDetails fcd -> println " * ${_relativePath(rootProject, fcd)}" }
+}
+
+task copyBuiltWorkspaceModules(type: Copy) {
+    dependsOn clean, distBundleTask
+    mustRunAfter buildDxpCloudServices
+    
+    from ("${distBundleTaskDestDir}/osgi/modules") {
+        include '*.jar'
+        into "deploy/common"
+    }
+
+    from ("${distBundleTaskDestDir}/osgi/war") {
+        include '*.war'
+        into "deploy/common"
+    }
+
+    into "${servicesBuildDir}/${liferayDxpServiceDir}"
+
+    
+    doFirst {
+        println "Copying custom modules, themes and wars built by Liferay Workspace '${liferayDxpServiceDir}' service:"
+    }
+
+    eachFile { FileCopyDetails fcd -> println " * ${_relativePath(rootProject, fcd)}" }
+}
+
+clean {
+    delete servicesBuildDir
+}
+
+task createMinimalBundleSrc() {
+    ext.sourceDir = "${rootProject.buildDir}/wedeploy-bundle-minimal"
+    
+    doFirst {
+        rootProject.file("${sourceDir}/liferay-portal-minimal").mkdirs()
+        rootProject.file("${sourceDir}/liferay-portal-minimal/.touch").text = ''
+    }
+}
+
+task zipMinimalBundleToBundlesCache(type: Zip) {
+    dependsOn createMinimalBundleSrc
+
+    from project.fileTree(dir: createMinimalBundleSrc.sourceDir)
+    destinationDir = downloadBundleTask.dest
+    archiveName 'wedeploy-bundle-minimal.zip'
+    
+    doLast {
+        println "Minimal bundle created: ${file(archivePath).absolutePath}"
+    }
+}
+
+if(gradle.liferayWorkspace.environment == 'dxpcloud') {
+    def expectedBundleUrl = "file:./${zipMinimalBundleToBundlesCache.archiveName}"
+    assert gradle.liferayWorkspace.bundleUrl == expectedBundleUrl,
+            "When building services for DXP Cloud (liferay.workspace.environment=dxpcloud'), " +
+                    "you have to use liferay.workspace.bundle.url=${expectedBundleUrl} (gradle.properties)"
+
+    // skip the :downloadBundle task, since expectedBundleUrl is not a valid URI (it's relative) - 
+    // we put put the file directly into cache of bundles (~/.liferay/bundles)
+    // We cannot configure the src of downloadBundleTask, because the distBundle is already 
+    // configured to copy the bundle from the cache with the original url's filename
+    downloadBundleTask.configure {
+        onlyIf { false }
+        dependsOn zipMinimalBundleToBundlesCache
+    }
+
+    clean {
+        // the directory is used for hot-deploy into local Docker stack, but it's kept by default
+        
+        delete rootProject.file(gradle.liferayWorkspace.homeDir)
+    }
+
+    gradle.taskGraph.whenReady { tg ->
+        // Only allow ':distBundle' from the Liferay Workspace plugin for 'dxpcloud' build
+
+        [ ':initBundle', ':distBundleZip', ':distBundleTar' ].each { workspaceTaskNotAllowedForDxpCloud ->
+            assert !tg.hasTask(workspaceTaskNotAllowedForDxpCloud),
+                    "When building services for DXP Cloud (liferay.workspace.environment=dxpcloud'), " +
+                    "you cannot use '${workspaceTaskNotAllowedForDxpCloud}'. For local development, " +
+                    "you need to setup Docker and use 'startDxpCloudLocal', please see README-dxpcloud.md for details."
+        }
+        
+        if(tg.hasTask(distWeDeploy)) {
+            def configsDir = rootProject.file(gradle.liferayWorkspace.configsDir)
+
+            assert !configsDir.isDirectory(),
+                    "The DXP Cloud build does not support 'configs' from Liferay Workspace. " +
+                    "Please make sure that the directory ('${rootProject.relativePath(configsDir)}/') " +
+                    "is not present in your project and run the build again. If you need to include some " +
+                    "extra files in your DXP inside DXP Cloud, put them into the right location " +
+                    "under 'wedeploy/${liferayDxpServiceDir}' (configs, license, deploy etc.) or " +
+                    "implement a custom Dockerfile for this service."
+        }
+    }
+}
+else {
+    gradle.taskGraph.whenReady { tg ->
+        // do not allow distWeDeploy outside of 'dxpcloud' build
+        assert !tg.hasTask(distWeDeploy),
+                "Building services for DXP Cloud (invoking 'distWeDeploy' task) is allowed only for DXP Cloud build. " +
+                "Please make sure to use 'liferay.workspace.environment=dxpcloud' for your build."
+    }
+}
+
+
+String _relativePath(Project contextProject, FileCopyDetails fcd) {
+    // cannot use FileCopyDetails.getFile(), it causes UnsupportedOperationException when any filter is applied
+    // fcd.toString() returns String "file '<absolute_path>'"
+    return fcd.toString().replace(contextProject.projectDir.absolutePath + File.separator, '')
+}
+
+String _relativePath(File contextDir, File f) {
+    return f.absolutePath - "${contextDir.absolutePath}/"
+}
+
+Task _findLiferayWorkspaceTask(String path) {
+    def foundTask = tasks.findByPath(path)
+    assert foundTask, "task '${path}' not found, was Liferay Workspace plugin applied in settings.properties?"
+    return foundTask
+}

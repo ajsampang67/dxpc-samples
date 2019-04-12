@@ -1,0 +1,91 @@
+version: '3.3'
+services:
+
+  database:
+    image: "mariadb:10.2.20"
+    environment:
+      - WEDEPLOY_PROJECT_ENVIRONMENT=local
+      
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=lportal
+      - MYSQL_USER=dxpcloud
+      - MYSQL_PASSWORD=dxpcloud
+    command: mysqld --character-set-server=utf8 --collation-server=utf8_general_ci --character-set-filesystem=utf8
+    volumes:
+      - type: volume
+        source: database-data
+        target: /var/lib/mysql
+      - type: bind
+        source: ./database
+        target: /wedeploy-container
+
+  liferay:
+    image: "@liferay.workspace.wedeploy.liferay.image@"
+    # If you have custom Dockerfile, uncomment below 3 lines and comment out the stock 'image' one above
+#    image: "@liferay.workspace.wedeploy.liferay.image@_${WORKSPACE_PROJECT_NAME:-custom-dockerfile}"
+#    build:
+#      context: ./@liferay.workspace.wedeploy.liferay.service.dir.name@
+
+    environment:
+      - WEDEPLOY_PROJECT_ENVIRONMENT=local
+      - LIFERAY_JAVA_OPTS=-Xms2g -Xmx2g
+
+      # ~ portal-ext.properties -> module.framework.properties.osgi.console=0.0.0.0:11311
+      # We cannot set this in 'liferay/configs/local/portal-env.properties', see the file for details why
+      - LIFERAY_MODULE_PERIOD_FRAMEWORK_PERIOD_PROPERTIES_PERIOD_OSGI_PERIOD_CONSOLE=0.0.0.0:11311
+    ports:
+      # Expose the Gogo shell port so that users can easily access it from Docker host
+      - "127.0.0.1:11311:11311"
+    volumes:
+      - type: volume
+        source: liferay-data
+        target: /opt/liferay/data
+      - type: bind
+        source: ./liferay
+        target: /wedeploy-container
+    depends_on:
+      - database
+      - search
+
+  search:
+    image: "@liferay.workspace.wedeploy.search.image@"
+    # If you have custom Dockerfile, uncomment below 3 lines and comment out the stock 'image' one above
+#    image: "@liferay.workspace.wedeploy.search.image@_${WORKSPACE_PROJECT_NAME:-custom-dockerfile}"
+#    build:
+#      context: ./search
+
+    environment:
+      - WEDEPLOY_PROJECT_ENVIRONMENT=local
+      - WEDEPLOY_SERVICE_SCALE=1
+      - WEDEPLOY_SERVICE_ID=search
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+
+      - discovery.type=single-node
+      - cluster.routing.allocation.disk.threshold_enabled=false
+    volumes:
+      - type: bind
+        source: ./search
+        target: /wedeploy-container
+
+  webserver:
+    image: "@liferay.workspace.wedeploy.webserver.image@"
+    # If you have custom Dockerfile, uncomment below 3 lines and comment out the stock 'image' one above
+#    image: "@liferay.workspace.wedeploy.webserver.image@_${WORKSPACE_PROJECT_NAME:-custom-dockerfile}"
+#    build:
+#      context: ./webserver
+    environment:
+      - WEDEPLOY_PROJECT_ENVIRONMENT=local
+    ports:
+      - "127.0.0.1:8080:80"
+    links:
+      - "liferay"
+    volumes:
+      - type: bind
+        source: ./webserver
+        target: /wedeploy-container
+    depends_on:
+      - liferay
+
+volumes:
+  liferay-data:
+  database-data:

@@ -1,0 +1,29 @@
+/*
+ * Copyright (c) 2000-present Liferay, Inc. All rights reserved.
+ *
+ * The contents of this file are subject to the terms of the Liferay Enterprise
+ * Subscription License ("License"). You may not use this file except in
+ * compliance with the License. You can obtain a copy of the License by
+ * contacting Liferay, Inc. See the License for the specific language governing
+ * permissions and limitations under the License, including but not limited to
+ * distribution rights of the Software.
+ */
+
+include 'wedeploy'
+
+// our project is in gradle/wedeploy, with custom name of the build file 
+def wedeployProject = project(':wedeploy')
+assert wedeployProject.parent == rootProject
+
+// relative to root of the Gradle project
+wedeployProject.projectDir = new File(settingsDir, 'gradle/wedeploy')
+wedeployProject.buildFileName = 'wedeploy.gradle'
+
+
+// Print build's metadata to stdout 
+def metadataProperties = new Properties()
+new File(wedeployProject.projectDir, 'dxpcloud.properties').withInputStream {
+    stream -> metadataProperties.load(stream)
+}
+
+println "..:: Liferay Workspace for DXP Cloud generated from archetype '${metadataProperties.archetypeName}:${metadataProperties.archetypeVersion}' ::.."

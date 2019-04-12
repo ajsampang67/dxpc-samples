@@ -1,0 +1,22 @@
+{
+  "id": "liferay",
+  "image": "@liferay.workspace.wedeploy.liferay.image@",
+  "memory": 8192,
+  "cpu": 8,
+  "env": {
+    "WEDEPLOY_PROJECT_LIFERAY_CLUSTER_ENABLED": "true"
+  },
+  "dependencies": [
+    "database",
+    "search"
+  ],
+  "volumes": {
+    "data": "/opt/liferay/data"
+  },
+  "public": false,
+  "environments": {
+    "infra": {
+      "deploy": false
+    }
+  }
+}

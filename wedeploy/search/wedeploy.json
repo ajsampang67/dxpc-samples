@@ -1,0 +1,16 @@
+{
+  "id": "search",
+  "image": "@liferay.workspace.wedeploy.search.image@",
+  "cpu": 8,
+  "memory": 8192,
+  "env": {
+    "ES_JAVA_OPTS": "-Xms4g -Xmx4g"
+  },
+  "zeroDowntime": false,
+  "public": false,
+  "environments": {
+    "infra": {
+      "deploy": false
+    }
+  }
+}

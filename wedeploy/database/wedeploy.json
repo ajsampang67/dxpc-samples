@@ -1,0 +1,18 @@
+{
+  "id": "database",
+  "image": "@liferay.workspace.wedeploy.database.image@",
+  "memory": 1024,
+  "cpu": 2,
+  "env": {
+    "WEDEPLOY_DBNAME": "lportal",
+    "WEDEPLOY_MASTER_USER_NAME": "dxpcloud",
+    "WEDEPLOY_MASTER_USER_PASSWORD": "YfM4CfoCvJ2OZncgqobwHTcufWtpb7"
+  },
+  "zeroDowntime": false,
+  "public": false,
+  "environments": {
+    "infra": {
+      "deploy": false
+    }
+  }
+}

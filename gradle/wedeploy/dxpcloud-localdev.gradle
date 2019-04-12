@@ -1,0 +1,240 @@
+/*
+ * Copyright (c) 2000-present Liferay, Inc. All rights reserved.
+ *
+ * The contents of this file are subject to the terms of the Liferay Enterprise
+ * Subscription License ("License"). You may not use this file except in
+ * compliance with the License. You can obtain a copy of the License by
+ * contacting Liferay, Inc. See the License for the specific language governing
+ * permissions and limitations under the License, including but not limited to
+ * distribution rights of the Software.
+ */
+
+def composeFile = "${project.dxpcloud.servicesBuildDir}/docker-compose.yml"
+def composeProjectName = "dxpcloud_${rootProject.name}"
+
+def dockerOsConfig = new DockerOSConfig(
+        windows: System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('windows'),
+        useSudo: project.dxpcloud.localStackUseSudo
+)
+
+// Tasks to start / stop / destroy dxpcloud development stack locally, using wedeploy/docker-compose.yml
+task startDxpCloudLocal(type: Exec) {
+    group "DXP Cloud"
+    description "Builds the Liferay stack for DXP Cloud and starts it locally using docker-compose."
+
+    dependsOn 'distWeDeploy'
+    mustRunAfter 'stopDxpCloudLocal'    // might be used to do a restart: `./gradlew stopDxpCloudLocal startDxpCloudLocal`
+
+    // for use inside of docker-compose.yml
+    environment(
+            WORKSPACE_PROJECT_NAME: rootProject.name,
+            WORKSPACE_PROJECT_DIR: rootProject.projectDir
+    )
+
+    commandLine(
+            _getCommandLine(
+                    dockerOsConfig, 'docker-compose', [
+                        '--file', composeFile,
+                        '--project-name', composeProjectName,
+                        'up',
+                        '--abort-on-container-exit',
+                        '--renew-anon-volumes',
+                        '--build',
+                        '--force-recreate'
+                    ])
+    )
+
+    doFirst {
+        println "Starting Liferay stack for DXP Cloud locally, using command:"
+        println "  ${commandLine.join(' ')}"
+        println ""
+    }
+}
+
+task stopDxpCloudLocal(type: Exec) {
+    group "DXP Cloud"
+    description "Stops the Liferay stack for DXP Cloud (if running locally using docker-compose). Persistent volumes are kept for reuse in the future."
+
+    dependsOn 'buildDxpCloudServices'
+
+    commandLine(
+            _getCommandLine(
+                    dockerOsConfig, 'docker-compose', [
+                            '--file', composeFile,
+                            '--project-name', composeProjectName,
+                            'stop',
+                            '--timeout', 60
+                    ])
+    )
+
+    doFirst {
+        println "Stopping local Liferay stack for DXP Cloud, using command:"
+        println "  ${commandLine.join(' ')}"
+        println ""
+    }
+}
+
+task destroyDxpCloudLocal(type: Exec) {
+    group "DXP Cloud"
+    description "Same as 'stopDxpCloudLocal' plus destroys any used volumes (persistent data) of the stack."
+
+    dependsOn 'buildDxpCloudServices'
+
+    commandLine(
+            _getCommandLine(
+                    dockerOsConfig, 'docker-compose', [
+                            '--file', composeFile,
+                            '--project-name', composeProjectName,
+                            'down',
+                            '--rmi', 'local',
+                            '--volumes',
+                            '--timeout', 60
+                    ])
+    )
+
+    doFirst {
+        println "Stopping and removing local Liferay stack for DXP Cloud, using command:"
+        println "  ${commandLine.join(' ')}"
+        println ""
+    }
+}
+
+task tarArtifactsForDeployToDxpCloudLocal(type: Tar) {
+
+    from(fileTree(rootProject.file(gradle.liferayWorkspace.homeDir)))
+
+    archiveName = "dxpCloudLocalHotDeploy.tar"
+    destinationDir = rootProject.buildDir
+
+    // the sole purpose of copying the files into Docker container thorugh a tar file
+    // is to be able to set mode of the files in the container - the UID:GID is set based
+    // on the host (or as root:root), which won't work for us - DXP wants to delete some
+    // copied files after being processed, e.g. from deploy/ once it copies it elsewhere
+    fileMode 0777
+    dirMode 0777
+}
+
+
+task deployToDxpCloudLocal(type: Exec) {
+
+    inputs.file tarArtifactsForDeployToDxpCloudLocal.getArchivePath()
+    outputs.file tarArtifactsForDeployToDxpCloudLocal.getArchivePath()
+
+    // see custom gradle.liferayWorkspace.homeDir set in the top of this file
+    def srcPath = rootProject.file(gradle.liferayWorkspace.homeDir)
+
+    def liferayServiceNameInDockerCompose = 'liferay'
+
+    // e.g. 'dxpcloud_lfrgs-liferay-jarvis_liferay_1'
+    def liferayContainerName = "${composeProjectName}_${liferayServiceNameInDockerCompose}_1"
+
+    group "DXP Cloud"
+    description "Deploys all currently built artifacts from '${rootProject.relativePath(srcPath)}' local Liferay DXP container."
+
+    dependsOn tarArtifactsForDeployToDxpCloudLocal
+
+    commandLine(
+            _getCommandLine(
+                    dockerOsConfig, 'docker', [
+                            'cp',
+                            "-", "${liferayContainerName}:/opt/liferay"
+                    ])
+    )
+
+    doFirst {
+        // Pass the files for 'docker cp' above as a TAR file read from stdin;
+        // must be configured in runtime phase, because file will not exist in config phase
+        standardInput new FileInputStream(tarArtifactsForDeployToDxpCloudLocal.getArchivePath())
+
+
+        srcPath.mkdirs()
+
+        // move all themes' war files out of deploy/ into osgi/war, since DXP would not be able to move them anyway
+
+        println "Hot-deploying into local DXP Cloud stack, using command:"
+        println "  ${commandLine.join(' ')} < ${rootProject.relativePath(tarArtifactsForDeployToDxpCloudLocal.getArchivePath())}"
+        println ""
+
+        println "  Following artifacts were discovered in '${rootProject.relativePath(srcPath)}' directory and will be deployed:"
+
+        def deployableFiles = fileTree(srcPath).findAll { it.isFile() }
+        deployableFiles.each { println "   - ${it.path - "${srcPath.path}/"}" }
+        if (!deployableFiles) {
+            println "    <no new files to deploy>"
+        }
+    }
+}
+
+if(gradle.liferayWorkspace.environment == 'dxpcloud') {
+    // configure all leaf-projects of projects where custom DXP modules can be built by Liferay Workspace
+    [
+            findProperty('liferay.workspace.ext.dir') ?: 'ext',
+            findProperty('liferay.workspace.modules.dir') ?: 'modules',
+            findProperty('liferay.workspace.themes.dir') ?: 'themes',
+            findProperty('liferay.workspace.wars.dir') ?: 'wars'
+
+    ].each { customModulesDir ->
+        configure(
+                rootProject.subprojects.findAll { it.path.startsWith(":${customModulesDir}") && !it.subprojects }
+        ) { Project customProject ->
+            logger.info "==> Configuring ${customProject} to deploy into local DXP Cloud stack"
+
+            customProject.afterEvaluate { Project configuredCustomProject ->
+                def deploy = configuredCustomProject.tasks.findByName('deploy')
+
+                if (deploy) {
+                    deploy.finalizedBy deployToDxpCloudLocal, tarArtifactsForDeployToDxpCloudLocal
+
+                    // NOTE: The pure OSGi modules (.jar files from modules/) are collected by 'distBundle' as files 
+                    // with the BND's version in the name, like 'build/dist/osgi/modules/com.liferay.acme.module-1.0.0.jar'.
+                    // The 'deploy' task on these modules however produces 'bundles/osgi/modules/com.liferay.acme.module.jar'
+                    // That is fine for our use-case: when we copy the non-version-named file over to running DXP, 
+                    // it will get deployed and override the module loaded from the version-named file - the jar's filename
+                    // does not matter for OSGi, the metadata is read from inside of the file;
+                    // We will have two similar jar files from now on (in /opt/liferay/osgi/modules), but since we will 
+                    // never restart the DXP inside Docker container, we will never get into situation where both files 
+                    // would be loaded into OSGi as modules, creating possible race condition.
+                }
+                else {
+                    println "WARN: 'deploy' task not found for ${configuredCustomProject}, this module won't be hot-deplyable into local DXP Cloud stack."
+                }
+            }
+        }
+    }
+}
+else {
+    logger.info "Liferay Workspace environment is not 'dxpcloud', deploy tasks of custom modules won't be enhanced to deploy to local DXP Cloud stack."
+}
+
+
+/**
+ * Return the command line depending on the OS config.
+ *
+ * @param config the details about the OS in which the command will be run, w.g. whether to prepend 'sudo' in front of the command itself
+ * @param command the OS command to invoke
+ * @param args the arguments to the OS command, to append after the command
+ * @return
+ */
+List<String> _getCommandLine(DockerOSConfig config, String command, List<String> args) {
+    def executable = command
+    def extraPreArgs = []
+
+    if (config.useSudo) {
+        executable = 'sudo'
+        extraPreArgs = [ command ]
+    }
+
+    if (config.isWindows()) {
+        executable = 'cmd'
+        extraPreArgs = [ '/c', 'docker-compose' ]
+    }
+
+    return [ executable ] + extraPreArgs + args
+}
+
+@groovy.transform.Immutable
+class DockerOSConfig {
+    boolean windows
+    boolean useSudo
+
+}

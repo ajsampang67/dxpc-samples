@@ -1,0 +1,25 @@
+// BEGIN Liferay Workspace plugin
+buildscript {
+    dependencies {
+        classpath group: "com.liferay", name: "com.liferay.gradle.plugins.workspace", version: "1.10.7"
+        classpath group: "net.saliman", name: "gradle-properties-plugin", version: "1.4.6"
+    }
+
+    repositories {
+        maven {
+            url "https://repository-cdn.liferay.com/nexus/content/groups/public"
+        }
+    }
+}
+
+apply plugin: "net.saliman.properties"
+
+apply plugin: "com.liferay.workspace"
+// END Liferay Workspace plugin
+
+// BEGIN WeDeploy
+apply from: 'gradle/wedeploy/settings-wedeploy.gradle'
+// END WeDeploy
+
+rootProject.name = 'liferaygssdlc'
+

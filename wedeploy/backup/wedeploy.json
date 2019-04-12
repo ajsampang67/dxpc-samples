@@ -1,0 +1,25 @@
+{
+  "id": "backup",
+  "image": "@liferay.workspace.wedeploy.backup.image@",
+  "memory": 1024,
+  "cpu": 1,
+  "env": {
+    "WEDEPLOY_BACKUP_FOLDER": "/opt/liferay/data",
+    "WEDEPLOY_BACKUP_RDS": "database",
+    "WEDEPLOY_MASTER_USER_PASSWORD": "YfM4CfoCvJ2OZncgqobwHTcufWtpb7"
+  },
+  "volumes": {
+    "data": "/opt/liferay/data",
+    "tmp": "/dxpcloud-tmp"
+  },
+  "dependencies": [
+    "database",
+    "liferay"
+  ],
+  "zeroDowntime": false,
+  "environments": {
+    "infra": {
+      "deploy": false
+    }
+  }
+}
