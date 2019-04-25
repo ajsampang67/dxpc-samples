@@ -1,15 +1,16 @@
 {
-  "id": "sonar",
-  "image": "devopsobj/sonar-with-database",
-  "cpu": 1,
-  "env": {
-    "JIRA_URL": "",
-    "MYSQL_ROOT_PASSWORD":"",
-    "SONAR_PASSWORD":"",
-    "SONAR_VERSION":"",
-    "SONARQUBE_HOME":"",
-    "SONARQUBE_WEB_JVM_OPTS": ""
-  },
-  "memory": 1024,
-  "public": true
+	"id": "sonar",
+		"image": "ajsampang67/lf-sonar",
+		"cpu": 1,
+		"memory": 2048,
+		"port":9000,
+		"env": {
+			"MYSQL_ROOT_PASSWORD":"liferay",
+			"SONAR_PASSWORD":"liferay"
+		},
+		"volumes":{
+			"sonar":"/opt/sonarqube/data",
+			"mysql":"/var/lib/mysql"
+		},
+		"public": true
 }
