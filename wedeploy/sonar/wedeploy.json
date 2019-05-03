@@ -1,8 +1,8 @@
 {
 	"id": "sonar",
-		"image": "ajsampang67/lf-sonar",
+		"image": "ajsampang67/lf-sonar:29042019",
 		"cpu": 1,
-		"memory": 2048,
+		"memory": 4096,
 		"port":9000,
 		"env": {
 			"MYSQL_ROOT_PASSWORD":"liferay",
